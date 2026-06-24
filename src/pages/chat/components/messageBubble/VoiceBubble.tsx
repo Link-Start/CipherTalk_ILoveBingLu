@@ -177,9 +177,11 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
           ? '阿里云 Qwen-ASR'
           : onlineProvider === 'qianwen-cloud'
             ? '千问云'
-            : onlineProvider === 'custom'
-              ? '自定义在线接口'
-              : 'OpenAI 兼容在线转写'
+            : onlineProvider === 'volcano-doubao'
+              ? '火山豆包'
+              : onlineProvider === 'custom'
+                ? '自定义在线接口'
+                : 'OpenAI 兼容在线转写'
 
         if (!modelExists) {
           setSttError(onlineReady.error || '在线转写配置不完整，请先到设置页补齐')
