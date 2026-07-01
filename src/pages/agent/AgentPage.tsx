@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Label, Modal, SearchField, Separator, Spinner, Surface, Switch, Toolbar, Tooltip, toast } from '@heroui/react'
-import { Brain, CheckIcon, ChevronDown, Clock3, Download, Globe, History, Info, ListChecks, Monitor, PanelLeft, PenLine, Play, Search, Share2, SquarePen, Terminal, Trash2, Users, Wrench, X } from 'lucide-react'
+import { Brain, CheckIcon, ChevronDown, Clock3, Download, Globe, History, Info, ListChecks, Monitor, PanelLeft, PenLine, Share2, SquarePen, Terminal, Trash2, X } from 'lucide-react'
 import { toPng } from 'dom-to-image-more'
 import {
   Conversation,
@@ -16,7 +16,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
-import { analyzeMessageRenderActivity, Message, MessageAttachment, MessageAttachments, MessageContent, MessageResponse, MessageStreamingIndicator } from '@/components/ai-elements/message'
+import { Message, MessageContent } from '@/components/ai-elements/message'
 import {
   PromptInput,
   PromptInputActionAddAttachments,
@@ -34,11 +34,6 @@ import {
 import { ImagePreview, type ImagePreviewOriginRect } from '@/components/ImagePreview'
 import AIProviderLogo from '@/components/ai/AIProviderLogo'
 import { getAIProviders, type AIModelInfo, type AIProviderInfo } from '@/types/ai'
-import {
-  ChainOfThoughtSearchResult,
-  ChainOfThoughtSearchResults,
-  ChainOfThoughtStep,
-} from '@/components/ai-elements/chain-of-thought'
 import { Loader } from '@/components/ai-elements/loader'
 import { IpcChatTransport, type AgentModelConfig, type AgentProgressEvent, type AgentReasoningEffort, type AgentScope, type AgentToolProfile, type CodeWorkspaceRef } from '@/features/aiagent/transport/ipcChatTransport'
 import { CODE_WORKSPACE_FILE_REF_MIME, CodeWorkspacePanel, CodeWorkspacePanelPopover, CodeWorkspaceSidebar, type CodeWorkspaceFileDragReference, type CodeWorkspacePanelTab } from './CodeWorkspacePanel'
@@ -59,38 +54,15 @@ import {
   AgentPromptAssetHeader,
   MENTION_SESSION_PAGE_SIZE,
   MentionField,
-  MentionTargetChips,
   MentionTriggerButton,
-  WorkspaceFileReferenceChips,
   buildWorkspaceFilePrefix,
   displayBasename,
-  getUserMessageDisplay,
   hasWorkspaceFileDrag,
   parseWorkspaceFileDragPayload,
   toMentionTarget,
   type MentionTarget,
 } from './AgentMentions'
-import {
-  MessageSources,
-  buildRenderSegments,
-  collectRetrievalBadges,
-  collectToolBadges,
-  extractSources,
-  formatElapsed,
-  formatToolName,
-  getDelegateTasks,
-  getPersonaControlOutput,
-  isAgentChainPart,
-  planRequiresDelegateAnalysis,
-  pushBadge,
-  renderChainLabel,
-  renderOutputActivitySteps,
-  stripPlanControlMarkers,
-  toolPartProgressKey,
-  toolProgressKey,
-  type AgentChainPart,
-  type AgentMessagePart,
-} from './agentMessageHelpers'
+import { extractSources, getPersonaControlOutput, toolProgressKey } from './agentMessageHelpers'
 import {
   buildFallbackConversationTitle,
   finiteNumber,
@@ -103,7 +75,6 @@ import {
   prepareAgentMessagesForPersist,
   presetMatchesCurrentConfig,
   readStoredActiveAgentConversation,
-  readSubAgentProgressFromMessage,
   readToolElapsedFromMessage,
   resolveDefaultPresetId,
   signatureAgentMessages,
@@ -113,10 +84,11 @@ import {
   type AgentConversationRecord,
   type AgentMessageMetadata,
 } from './agentConversationHelpers'
-import { MessageUsageStats, UsageDetailsModal, formatTokenCount, messageTextOf } from './AgentUsageStats'
+import { UsageDetailsModal, formatTokenCount } from './AgentUsageStats'
 import { AgentShareCard, buildAgentSharePreviewData, formatAgentShareFileDate, sanitizeAgentShareFileName, type AgentSharePreviewData } from './AgentShareCard'
 import { AGENT_PENDING_TITLE, ModelWaitingLine, SubAgentProgressPanel, mergeSubAgentProgress, shouldDisplayAgentProgress } from './AgentSubAgentProgress'
-import { CompactionMarker, MessageChainOfThought, ModelItem, PlanCard, UserMessageActions, type AgentModelItem, type CompactionPartData } from './AgentMessageBlocks'
+import { ModelItem, type AgentModelItem } from './AgentMessageBlocks'
+import { AgentMessageItem } from './AgentMessageItem'
 
 export default function AgentPage() {
   const [presets, setPresets] = useState<configService.AiConfigPreset[]>([])
@@ -1367,13 +1339,16 @@ export default function AgentPage() {
     }
   }
 
+  // 三个都用 messagesRef.current 而不是闭包里的 messages：后者每次流式 tick 都变，
+  // 会导致这几个回调的引用跟着每 tick 重建，直接传给逐条消息的 memo 组件时白白让它们全部重渲染。
   const handleRegenerateAssistantMessage = useCallback((messageIndex: number) => {
     if (busy || !selectedModelSupportsTools) return
-    const assistantMessage = messages[messageIndex]
+    const currentMessages = messagesRef.current
+    const assistantMessage = currentMessages[messageIndex]
     if (!assistantMessage || assistantMessage.role !== 'assistant') return
     const userIndex = (() => {
       for (let index = messageIndex - 1; index >= 0; index -= 1) {
-        if (messages[index]?.role === 'user') return index
+        if (currentMessages[index]?.role === 'user') return index
       }
       return -1
     })()
@@ -1386,7 +1361,7 @@ export default function AgentPage() {
     setSubAgentProgress([])
     runIsPlanRef.current = planModeRef.current
     submitScopeRef.current = activeScopeRef.current
-    const nextMessages = messages.slice(0, messageIndex)
+    const nextMessages = currentMessages.slice(0, messageIndex)
     messagesRef.current = nextMessages
 
     const sendPromise = Promise.resolve(regenerate({ messageId: assistantMessage.id })).finally(() => {
@@ -1394,11 +1369,12 @@ export default function AgentPage() {
       setAgentRunPending(false)
     })
     void sendPromise
-  }, [busy, messages, regenerate, selectedModelSupportsTools])
+  }, [busy, regenerate, selectedModelSupportsTools])
 
   const handleRetryUserMessage = useCallback((messageIndex: number) => {
     if (busy || !selectedModelSupportsTools) return
-    const userMessage = messages[messageIndex]
+    const currentMessages = messagesRef.current
+    const userMessage = currentMessages[messageIndex]
     if (!userMessage || userMessage.role !== 'user') return
 
     stopSpeakingMessage()
@@ -1408,7 +1384,7 @@ export default function AgentPage() {
     setSubAgentProgress([])
     runIsPlanRef.current = planModeRef.current
     submitScopeRef.current = activeScopeRef.current
-    const nextMessages = messages.slice(0, messageIndex + 1)
+    const nextMessages = currentMessages.slice(0, messageIndex + 1)
     setMessages(nextMessages)
     messagesRef.current = nextMessages
 
@@ -1417,20 +1393,21 @@ export default function AgentPage() {
       setAgentRunPending(false)
     })
     void sendPromise
-  }, [busy, messages, regenerate, selectedModelSupportsTools, setMessages, stopSpeakingMessage])
+  }, [busy, regenerate, selectedModelSupportsTools, setMessages, stopSpeakingMessage])
 
   const handleEditUserMessage = useCallback((messageIndex: number, text: string) => {
     if (busy) return
-    const userMessage = messages[messageIndex]
+    const currentMessages = messagesRef.current
+    const userMessage = currentMessages[messageIndex]
     if (!userMessage || userMessage.role !== 'user') return
     promptInputControllerRef.current?.textInput.setInput(text)
-    const nextMessages = messages.slice(0, messageIndex)
+    const nextMessages = currentMessages.slice(0, messageIndex)
     setMessages(nextMessages)
     messagesRef.current = nextMessages
     setAgentNotice('')
     setAgentProgress([])
     setSubAgentProgress([])
-  }, [busy, messages, setMessages])
+  }, [busy, setMessages])
 
   // 计划模式确认：关闭计划模式并让 Agent 按上一条计划开始执行（沿用当前会话 scope）
   const handleExecutePlan = useCallback(() => {
@@ -1763,289 +1740,32 @@ export default function AgentPage() {
               description="输入问题后，助手会基于本地聊天数据回答"
             />
           ) : (
-            messages.map((message, messageIndex) => {
-              const isLastMessage = messageIndex === messages.length - 1
-              const lastPart = message.parts[message.parts.length - 1]
-              const isReasoningStreaming = isLastMessage && status === 'streaming' && lastPart?.type === 'reasoning'
-              const chainActive = isLastMessage && busy
-              const assistantText = message.role === 'assistant' ? messageTextOf(message) : ''
-              const userMessageText = message.role === 'user' ? messageTextOf(message) : ''
-              const assistantTextStreaming = message.role === 'assistant' && isLastMessage && status === 'streaming'
-              // 计划模式生成的消息：正文(执行计划)走 PlanCard 折叠卡片，不再走普通 Markdown 渲染。
-              // 完成后看 metadata.planMode；流式期间 metadata 还没回来，靠在途标记 runIsPlanRef 判定。
-              const isPlanMessage = message.role === 'assistant' && (
-                (message.metadata as AgentMessageMetadata | undefined)?.planMode === true
-                || (isLastMessage && busy && runIsPlanRef.current)
-              )
-              const assistantDisplayText = isPlanMessage ? stripPlanControlMarkers(assistantText) : assistantText
-              const planNeedsDelegateAnalysis = isPlanMessage && planRequiresDelegateAnalysis(assistantText)
-              const outputActivity = message.role === 'assistant'
-                ? analyzeMessageRenderActivity(assistantDisplayText, assistantTextStreaming)
-                : null
-              const outputActivitySteps = outputActivity ? renderOutputActivitySteps(outputActivity, assistantTextStreaming) : []
-              const userDisplay = message.role === 'user' ? getUserMessageDisplay(message.parts) : null
-              const persistedSubAgentEvents = message.role === 'assistant' ? readSubAgentProgressFromMessage(message) : []
-              const subAgentEventsForMessage = message.role === 'assistant'
-                ? (isLastMessage && subAgentProgress.length > 0 ? subAgentProgress : persistedSubAgentEvents)
-                : []
-              const orderedSegments = buildRenderSegments(message.parts)
-              const userFileParts = message.role === 'user'
-                ? message.parts
-                  .map((part, index) => ({ part, index }))
-                  .filter((item): item is { part: Extract<UIMessage['parts'][number], { type: 'file' }>; index: number } => item.part.type === 'file')
-                : []
-              const hasRenderableUserText = message.role === 'user'
-                && message.parts.some((part, index) => {
-                  if (part.type !== 'text') return false
-                  const displayText = userDisplay?.textByPartIndex.get(index) ?? part.text
-                  return Boolean(displayText.trim())
-                })
-              const shouldRenderMessageContent = message.role !== 'user' || hasRenderableUserText
-              // generate_image / send_sticker / send_random_image / send_media_from_history / inspect_media_image 的产出图：正文区直接展示
-              const renderGeneratedImageTool = (part: AgentMessagePart, index: number) => {
-                if (!isAgentChainPart(part)) return null
-                const isSticker = part.type === 'tool-send_sticker'
-                const isRandomImage = part.type === 'tool-send_random_image'
-                const isHistoryMedia = part.type === 'tool-send_media_from_history'
-                const isInspectMedia = part.type === 'tool-inspect_media_image'
-                const isGenerated = part.type === 'tool-generate_image'
-                if ((!isSticker && !isRandomImage && !isHistoryMedia && !isInspectMedia && !isGenerated) || part.state !== 'output-available') return null
-                const output = part.output as { filePath?: unknown; from?: unknown; sender?: unknown; time?: unknown; mediaKind?: unknown } | undefined
-                const filePath = String(output?.filePath || '')
-                if (!filePath) return null
-                const imageSrc = `local-image://${encodeURIComponent(filePath)}`
-                const caption = isRandomImage || isHistoryMedia || isInspectMedia
-                  ? [output?.sender, output?.from, output?.time].map((v) => String(v || '')).filter(Boolean).join(' · ')
-                  : ''
-                return (
-                  <div className="mt-1 w-fit" key={`genimg-${index}`}>
-                    <button
-                      className="block w-fit cursor-pointer border-0 bg-transparent p-0 text-left"
-                      onClick={(event) => {
-                        const rect = event.currentTarget.getBoundingClientRect()
-                        setGeneratedImagePreview({
-                          src: imageSrc,
-                          originRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
-                        })
-                      }}
-                      title="点击预览"
-                      type="button"
-                    >
-                      <img
-                        alt={isSticker || output?.mediaKind === 'emoji' ? '表情包' : isRandomImage || isHistoryMedia || isInspectMedia ? '历史图片' : 'AI 生成的图片'}
-                        className={isSticker || output?.mediaKind === 'emoji'
-                          ? 'max-h-40 max-w-40 rounded-(--agent-radius,12px)'
-                          : 'max-h-90 max-w-full rounded-(--agent-radius,12px) border border-border/60 shadow-xs'}
-                        src={imageSrc}
-                      />
-                    </button>
-                    {caption && (
-                      <div className="mt-1 text-muted-foreground text-xs">{caption}</div>
-                    )}
-                  </div>
-                )
-              }
-              const renderChainSegment = (segment: Array<{ part: AgentChainPart; index: number }>, segmentActive: boolean) => (
-                <MessageChainOfThought active={segmentActive} key={`chain-${segment[0]?.index ?? 0}`}>
-                  {segment.map(({ part, index }) => {
-                    if (part.type === 'reasoning') {
-                      const reasoningActive = isReasoningStreaming && index === message.parts.length - 1
-                      return (
-                        <ChainOfThoughtStep
-                          icon={Brain}
-                          key={`chain-${index}`}
-                          label={renderChainLabel('Reasoning', reasoningActive)}
-                          status={reasoningActive ? 'active' : 'complete'}
-                        >
-                          <div className="whitespace-pre-wrap text-muted-foreground text-sm">
-                            {part.text}
-                          </div>
-                        </ChainOfThoughtStep>
-                      )
-                    }
-                    const toolName = part.type.replace(/^tool-/, '')
-                    const done = part.state === 'output-available' || part.state === 'output-error' || part.state === 'output-denied'
-                    const toolLabel = formatToolName(toolName)
-                    const elapsedMs = toolElapsedByKey[toolPartProgressKey(part, toolName)]
-                    const stateLabel = part.state === 'approval-requested'
-                      ? '等待确认'
-                      : part.state === 'approval-responded'
-                        ? '已确认'
-                        : part.state === 'output-denied'
-                          ? '已拒绝'
-                          : ''
-                    const label = [
-                      toolLabel,
-                      done && elapsedMs ? formatElapsed(elapsedMs) : stateLabel,
-                    ].filter(Boolean).join(' · ')
-                    const badges = collectToolBadges(part.input)
-                    const delegateTasks = toolName === 'delegate_analysis' ? getDelegateTasks(part) : undefined
-                    if (part.state === 'output-available') {
-                      for (const badge of collectRetrievalBadges(toolName, part.output)) pushBadge(badges, badge)
-                      collectToolBadges(part.output, badges)
-                    }
-                    return (
-                      <ChainOfThoughtStep
-                        icon={toolName.includes('search') ? Search : Wrench}
-                        key={`chain-${index}`}
-                        label={renderChainLabel(label, !done)}
-                        status={done ? 'complete' : 'active'}
-                      >
-                        {badges.length > 0 && (
-                          <ChainOfThoughtSearchResults>
-                            {badges.map((badge) => (
-                              <ChainOfThoughtSearchResult key={badge}>
-                                {badge}
-                              </ChainOfThoughtSearchResult>
-                            ))}
-                          </ChainOfThoughtSearchResults>
-                        )}
-                        {part.state === 'output-error' && part.errorText && (
-                          <p className="text-destructive text-xs">{part.errorText}</p>
-                        )}
-                        {part.state === 'output-denied' && (
-                          <p className="text-muted-foreground text-xs">用户拒绝了这次工具操作。</p>
-                        )}
-                        {toolName === 'delegate_analysis' && subAgentEventsForMessage.length > 0 && (
-                          <SubAgentProgressPanel events={subAgentEventsForMessage} tasks={delegateTasks} />
-                        )}
-                      </ChainOfThoughtStep>
-                    )
-                  })}
-                </MessageChainOfThought>
-              )
-              return (
-                <Message from={message.role} key={message.id}>
-                  {userDisplay && <MentionTargetChips align="end" targets={userDisplay.mentions} />}
-                  {userDisplay && <WorkspaceFileReferenceChips align="end" refs={userDisplay.workspaceFiles} />}
-                  {userFileParts.length > 0 && (
-                    <MessageAttachments className="justify-end">
-                      {userFileParts.map(({ part, index }) => (
-                        <MessageAttachment data={part} key={`user-file-${index}`} />
-                      ))}
-                    </MessageAttachments>
-                  )}
-                  {shouldRenderMessageContent && (
-                    <MessageContent>
-                      {isPlanMessage && assistantDisplayText && (
-                        <PlanCard streaming={assistantTextStreaming} text={assistantDisplayText} />
-                      )}
-                      {orderedSegments.map((segment, segmentIndex) => {
-                        const isLastSegment = segmentIndex === orderedSegments.length - 1
-                        if (segment.kind === 'chain') {
-                          // 只有位于消息末尾、还在运行中的执行过程块保持展开；后面已经出正文的块自动收起。
-                          const segmentActive = chainActive && isLastSegment
-                          return (
-                            <div className="space-y-2" key={`chain-${segment.items[0]?.index ?? 0}`}>
-                              {renderChainSegment(segment.items, segmentActive)}
-                              {segment.items.map(({ part, index }) => renderGeneratedImageTool(part, index))}
-                            </div>
-                          )
-                        }
-                        const { part, index } = segment
-                        if (part.type === 'text') {
-                          // 计划消息的正文已经在 PlanCard 里展示，这里不再重复渲染。
-                          if (isPlanMessage) return null
-                          const displayText = userDisplay?.textByPartIndex.get(index) ?? part.text
-                          if (!displayText) return null
-                          return (
-                            <MessageResponse
-                              isStreaming={assistantTextStreaming && isLastSegment}
-                              key={`text-${index}`}
-                              showStreamingIndicator={false}
-                            >
-                              {displayText}
-                            </MessageResponse>
-                          )
-                        }
-                        if (part.type === 'file') {
-                          if (message.role === 'user') return null
-                          return (
-                            <MessageAttachments key={`file-${index}`}>
-                              <MessageAttachment data={part} />
-                            </MessageAttachments>
-                          )
-                        }
-                        if (part.type === 'data-compaction') {
-                          const partId = (part as { id?: string }).id
-                          return (
-                            <CompactionMarker
-                              data={((part as { data?: CompactionPartData }).data) || {}}
-                              key={`compaction-${partId || index}`}
-                            />
-                          )
-                        }
-                        return null
-                      })}
-                      {outputActivitySteps.length > 0 && (
-                        <MessageChainOfThought active={chainActive}>
-                          {outputActivitySteps.map((step) => {
-                            const Icon = step.icon
-                            return (
-                              <ChainOfThoughtStep
-                                icon={Icon}
-                                key={`output-${step.key}`}
-                                label={renderChainLabel(step.active ? step.label : step.doneLabel, step.active)}
-                                status={step.active ? 'active' : 'complete'}
-                              />
-                            )
-                          })}
-                        </MessageChainOfThought>
-                      )}
-                      {assistantTextStreaming && <MessageStreamingIndicator />}
-                      {message.role === 'assistant' && (
-                        <MessageSources items={extractSources(message.parts)} nameOf={sessionNameOf} />
-                      )}
-                      {message.role === 'assistant' && !(isLastMessage && busy) && (
-                        <MessageUsageStats
-                          canRegenerate={selectedModelSupportsTools}
-                          copied={copiedMessageId === message.id}
-                          metadata={message.metadata}
-                          messageText={assistantDisplayText}
-                          onCopy={() => { void handleCopyAssistantMessage(message.id, assistantDisplayText) }}
-                          onOpenDetails={setUsageDetailsModal}
-                          onRegenerate={() => handleRegenerateAssistantMessage(messageIndex)}
-                          onSpeak={() => handleSpeakAssistantMessage(message.id, assistantDisplayText)}
-                          regenerating={busy}
-                          speaking={speakingMessageId === message.id}
-                        />
-                      )}
-                      {isPlanMessage && isLastMessage && !busy && (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <HeroButton
-                            isDisabled={!selectedModelSupportsTools}
-                            onPress={handleExecutePlan}
-                            size="sm"
-                            variant="primary"
-                          >
-                            <Play className="size-3.5" />
-                            开始执行
-                          </HeroButton>
-                          {planNeedsDelegateAnalysis && (
-                            <span className="inline-flex items-center gap-1 rounded-(--agent-radius,12px) border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-700 text-xs dark:text-amber-300">
-                              <Users className="size-3.5" />
-                              预计会委托子助手
-                            </span>
-                          )}
-                          <span className="text-muted-foreground text-xs">确认计划后点此执行，或直接回复修改计划</span>
-                        </div>
-                      )}
-                    </MessageContent>
-                  )}
-                  {message.role === 'user' && (
-                    <UserMessageActions
-                      canRetry={selectedModelSupportsTools}
-                      copied={copiedMessageId === message.id}
-                      messageText={userMessageText}
-                      onCopy={() => { void handleCopyUserMessage(message.id, userMessageText) }}
-                      onEdit={() => handleEditUserMessage(messageIndex, userMessageText)}
-                      onRetry={() => handleRetryUserMessage(messageIndex)}
-                      retrying={busy}
-                    />
-                  )}
-                </Message>
-              )
-            })
+            messages.map((message, messageIndex) => (
+              <AgentMessageItem
+                busy={busy}
+                copied={copiedMessageId === message.id}
+                isLastMessage={messageIndex === messages.length - 1}
+                key={message.id}
+                message={message}
+                messageIndex={messageIndex}
+                onCopyAssistant={handleCopyAssistantMessage}
+                onCopyUser={handleCopyUserMessage}
+                onEdit={handleEditUserMessage}
+                onExecutePlan={handleExecutePlan}
+                onOpenUsageDetails={setUsageDetailsModal}
+                onPreviewGeneratedImage={setGeneratedImagePreview}
+                onRegenerate={handleRegenerateAssistantMessage}
+                onRetry={handleRetryUserMessage}
+                onSpeak={handleSpeakAssistantMessage}
+                runIsPlan={runIsPlanRef.current}
+                selectedModelSupportsTools={selectedModelSupportsTools}
+                sessionNameOf={sessionNameOf}
+                speaking={speakingMessageId === message.id}
+                status={status}
+                subAgentProgress={subAgentProgress}
+                toolElapsedByKey={toolElapsedByKey}
+              />
+            ))
           )}
           {waitingFirstModelOutput && (
             <Message from="assistant">
