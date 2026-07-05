@@ -37,7 +37,7 @@ import {
 } from "@gravity-ui/icons";
 import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, Fragment, cloneElement, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown, type AnimateOptions } from "streamdown";
+import { Streamdown } from "streamdown";
 import { bundledLanguages, type BundledLanguage } from "shiki";
 import { CodeBlock } from "./code-block";
 import { Terminal, TerminalContent } from "./terminal";
@@ -702,7 +702,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
   const isBlock = "data-block" in props;
   if (!isBlock) {
     return (
-      <code className={cn(className, "rounded-(--agent-radius,12px) bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground")}>
+      <code className={cn(className, "box-decoration-clone rounded-(--agent-radius,12px) border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground dark:bg-primary/20")}>
         {children}
       </code>
     );
@@ -713,7 +713,10 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
   const displayLanguage = getOriginalFenceLanguage(markdown, code, rawLanguage) ?? rawLanguage;
   const canPreviewHtml = isHtmlCode(rawLanguage, code);
   const canRenderTerminal = isTerminalCode(rawLanguage);
-  const chartOption = canParseChartOption(rawLanguage) ? parseChartOption(code) : null;
+  const chartOption = useMemo(
+    () => canParseChartOption(rawLanguage) ? parseChartOption(code) : null,
+    [code, rawLanguage]
+  );
   const language = normalizeCodeLanguage(canPreviewHtml && !rawLanguage ? "html" : rawLanguage);
   const chartRef = useRef<ChartBlockHandle | null>(null);
 
@@ -762,12 +765,12 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
   }
 
   return (
-    <HeroCard className="group/code relative my-2 flex w-fit max-w-full gap-0 overflow-hidden bg-[#181a20] p-0 text-white dark:bg-[#181a20]" variant="default">
+    <HeroCard className="group/code relative my-2 flex w-fit max-w-full gap-0 overflow-hidden border border-border/70 bg-card p-0 text-card-foreground shadow-xs" variant="default">
       <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-70 transition-opacity group-hover/code:opacity-100">
           {canPreviewHtml && (
             <HeroButton
               aria-label={showPreview ? "查看代码" : "预览 HTML"}
-              className="size-7 min-w-0 rounded-full bg-transparent p-0 text-white/55 shadow-none data-[hovered=true]:bg-white/10 data-[hovered=true]:text-white data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+              className="size-7 min-w-0 rounded-full bg-background/65 p-0 text-muted-foreground shadow-none backdrop-blur-sm data-[hovered=true]:bg-accent/15 data-[hovered=true]:text-foreground data-[pressed=true]:scale-95 [&_svg]:size-3.5"
               isIconOnly
               onPress={() => setShowPreview((value) => !value)}
               size="sm"
@@ -778,7 +781,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
           )}
           <HeroButton
             aria-label={isCopied ? "已复制" : "复制代码"}
-            className="size-7 min-w-0 rounded-full bg-transparent p-0 text-white/55 shadow-none data-[hovered=true]:bg-white/10 data-[hovered=true]:text-white data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+            className="size-7 min-w-0 rounded-full bg-background/65 p-0 text-muted-foreground shadow-none backdrop-blur-sm data-[hovered=true]:bg-accent/15 data-[hovered=true]:text-foreground data-[pressed=true]:scale-95 [&_svg]:size-3.5"
             isIconOnly
             onPress={() => void handleCopy()}
             size="sm"
@@ -806,7 +809,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
           language={language}
         />
       )}
-      <div className="pointer-events-none absolute right-2 bottom-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md bg-black/25 px-2 py-0.5 font-mono text-[11px] text-white/45 backdrop-blur-sm">
+      <div className="pointer-events-none absolute right-2 bottom-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-border/50 bg-background/70 px-2 py-0.5 font-mono text-[11px] text-muted-foreground backdrop-blur-sm">
         {showPreview && canPreviewHtml ? "preview" : canRenderTerminal ? "terminal" : displayLanguage || language}
       </div>
     </HeroCard>
@@ -1218,16 +1221,6 @@ export function MessageStreamingIndicator({ className, ...props }: HTMLAttribute
   );
 }
 
-// 流式新增文字逐字淡入（中文没有空格分词，按字符切分）。
-// 插件自动跳过 code/pre/svg/math，且已渲染过的字符不会重复动画。
-// 后端 smoothStream 已经按 ~10ms/词的节奏匀速吐字，这里的淡入只是锦上添花的轻微视觉效果，
-// duration/stagger 必须远小于后端节奏，否则会跟后端的节奏叠加，显得字比实际到达慢很多。
-const STREAMING_TEXT_ANIMATION: AnimateOptions = {
-  sep: "char",
-  duration: 40,
-  stagger: 2,
-};
-
 export const MessageResponse = memo(
   ({ className, components, isStreaming = false, showStreamingIndicator = true, children, ...props }: MessageResponseProps) => {
     const markdown = typeof children === "string" ? children : "";
@@ -1236,7 +1229,7 @@ export const MessageResponse = memo(
     return (
       <MessageRenderContext.Provider value={{ isStreaming, markdown }}>
         <Streamdown
-          animated={isStreaming ? STREAMING_TEXT_ANIMATION : false}
+          animated={false}
           className={cn(
             "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
             className
@@ -1259,12 +1252,27 @@ export const MessageResponse = memo(
       </MessageRenderContext.Provider>
     );
   },
-  (prevProps, nextProps) => prevProps.children === nextProps.children
-    && prevProps.isStreaming === nextProps.isStreaming
-    && prevProps.showStreamingIndicator === nextProps.showStreamingIndicator
+  messageResponsePropsAreEqual
 );
 
 MessageResponse.displayName = "MessageResponse";
+
+const MESSAGE_RESPONSE_MEMO_KEYS = new Set(["children", "isStreaming", "showStreamingIndicator"]);
+
+function messageResponsePropsAreEqual(prevProps: MessageResponseProps, nextProps: MessageResponseProps) {
+  if (prevProps.children !== nextProps.children) return false;
+  if (prevProps.isStreaming !== nextProps.isStreaming) return false;
+  if (prevProps.showStreamingIndicator !== nextProps.showStreamingIndicator) return false;
+
+  const prevKeys = Object.keys(prevProps).filter((key) => !MESSAGE_RESPONSE_MEMO_KEYS.has(key));
+  const nextKeys = Object.keys(nextProps).filter((key) => !MESSAGE_RESPONSE_MEMO_KEYS.has(key));
+  if (prevKeys.length !== nextKeys.length) return false;
+
+  return prevKeys.every((key) => (
+    Object.prototype.hasOwnProperty.call(nextProps, key)
+    && (prevProps as Record<string, unknown>)[key] === (nextProps as Record<string, unknown>)[key]
+  ));
+}
 
 function formatAttachmentSize(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {

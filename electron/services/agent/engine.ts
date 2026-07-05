@@ -2,7 +2,7 @@
  * 编排引擎 —— 用 AI SDK 的 ToolLoopAgent 跑 ReAct 循环，流式产出 UIMessageChunk。
  * 运行在 AI utilityProcess 子进程内（见文档 §3.1/§5.2）。
  */
-import { generateText, smoothStream, tool, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
+import { generateText, tool, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
 import { z } from 'zod'
 import type { SystemModelMessage } from '@ai-sdk/provider-utils'
 import { createLanguageModel } from './provider'
@@ -26,17 +26,6 @@ import type { CodeWorkspaceRef } from './codeWorkspaceTypes'
 const MAX_STEPS = 24
 const DEFAULT_AGENT_TEMPERATURE = 0.2
 const REPLY_DEEP_MAX_STEPS = 10
-
-type SegmenterLike = {
-  segment(input: string): Iterable<unknown>
-}
-
-function createSmoothStreamChunker(): 'word' | SegmenterLike {
-  const segmenterCtor = (Intl as unknown as {
-    Segmenter?: new (locales?: string | string[], options?: { granularity?: 'grapheme' | 'word' | 'sentence' }) => SegmenterLike
-  }).Segmenter
-  return segmenterCtor ? new segmenterCtor('zh', { granularity: 'word' }) : 'word'
-}
 
 export function buildAgentInstructions(
   input: AgentRunInput,
@@ -182,6 +171,7 @@ export async function runAgent(
     }
     perf('记忆上下文', cachedMemoryContext === null ? '未命中缓存，后台补建' : '缓存命中')
     const relevantMemoryContext = await preloadRelevantMemories(userText, input.scope)
+    perf('相关记忆预取', `${relevantMemoryContext.length} 字符`)
     const toolsDisabled = input.toolMode === 'disabled'
     const webSearchOn = !toolsDisabled && isWebSearchAvailable()
     const imageGenOn = !toolsDisabled && isImageGenAvailable()
@@ -226,15 +216,9 @@ export async function runAgent(
     const result = await agent.stream({
       messages: input.messages,
       abortSignal: signal,
-      // 文本按词匀速放流：模型突发吐一大段时不再整块砸向 UI，而是 ~10ms/词的稳定节奏。
-      // 中文没有空格，用 Intl.Segmenter 做 CJK 分词（AI SDK 官方推荐做法）。
-      experimental_transform: smoothStream({
-        delayInMs: 10,
-        chunking: createSmoothStreamChunker(),
-      }),
     })
     perf('发起模型流式请求')
-    // 截留 message 的 finish，等 L1 自动记忆注入完再补发，让自动写入的工具 part 落在本条消息内
+    // 截留 message 的 finish，等主回答流真正结束、工具状态补齐后再发；自动记忆抽取改成后台异步，不再等它
     let finishChunk: UIMessageChunk | undefined
     let perfFirstEventSeen = false
     let perfFirstOutputSeen = false

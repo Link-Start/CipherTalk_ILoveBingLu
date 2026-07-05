@@ -3,7 +3,7 @@
  * 从 AgentPage.tsx 拆出。
  */
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Dropdown, Label } from '@heroui/react'
+import { Card, Dropdown, Label } from '@heroui/react'
 import { ArrowsRotateLeft, Bulb, Check, ChevronDown, Copy, CurlyBrackets, FileText, ListCheck, PencilToLine, Picture, Wrench } from '@gravity-ui/icons'
 import {
   ChainOfThought,
@@ -144,10 +144,10 @@ function ToolIOSection({ label, text }: { label: string; text: string }) {
   if (!text) return null
   const clipped = text.length > TOOL_IO_CHAR_CAP ? `${text.slice(0, TOOL_IO_CHAR_CAP)}\n…（已截断，共 ${text.length} 字）` : text
   return (
-    <div className="mt-1.5">
-      <div className="mb-0.5 text-[11px] text-muted-foreground">{label}</div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word rounded-(--agent-radius,12px) bg-muted/40 px-2 py-1.5 text-[11px] text-foreground leading-5">{clipped}</pre>
-    </div>
+    <Card className="mt-1.5 w-fit max-w-full gap-1" variant="transparent">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <pre className="max-h-64 max-w-full overflow-auto whitespace-pre-wrap wrap-break-word text-[11px] text-foreground leading-5">{clipped}</pre>
+    </Card>
   )
 }
 

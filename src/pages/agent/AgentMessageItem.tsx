@@ -192,9 +192,13 @@ function AgentMessageItemImpl({
               label={renderChainLabel('Reasoning', reasoningActive)}
               status={reasoningActive ? 'active' : 'complete'}
             >
-              <div className="whitespace-pre-wrap text-muted-foreground text-sm">
+              <MessageResponse
+                className="text-muted-foreground text-sm"
+                isStreaming={reasoningActive}
+                showStreamingIndicator={false}
+              >
                 {part.text}
-              </div>
+              </MessageResponse>
             </ChainOfThoughtStep>
           )
         }

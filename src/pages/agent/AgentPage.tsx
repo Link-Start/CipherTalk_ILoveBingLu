@@ -415,8 +415,11 @@ export default function AgentPage() {
     } else {
       if (displayProgress) {
         setAgentProgress((prev) => {
-          const withoutLocalPending = prev.filter((item) => item.title !== AGENT_PENDING_TITLE)
-          return mergeSubAgentProgress(withoutLocalPending, progress)
+          const hasLocalPending = prev.some((item) => item.title === AGENT_PENDING_TITLE)
+          return mergeSubAgentProgress(
+            hasLocalPending ? prev.filter((item) => item.title !== AGENT_PENDING_TITLE) : prev,
+            progress,
+          )
         })
       }
       if (progress.stage === 'run_started') {
@@ -427,10 +430,14 @@ export default function AgentPage() {
     }
 
     if (progress.stage === 'tool_finished' && progress.toolName && progress.elapsedMs) {
-      setToolElapsedByKey((prev) => ({
-        ...prev,
-        [toolProgressKey(progress.toolName!, progress.toolCallId)]: progress.elapsedMs!,
-      }))
+      setToolElapsedByKey((prev) => {
+        const key = toolProgressKey(progress.toolName!, progress.toolCallId)
+        if (prev[key] === progress.elapsedMs) return prev
+        return {
+          ...prev,
+          [key]: progress.elapsedMs!,
+        }
+      })
     }
   }, [])
 
