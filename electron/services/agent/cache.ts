@@ -6,6 +6,8 @@ import type { AgentReasoningEffort, AgentRunInput } from './types'
 export interface AgentPromptParts {
   cacheableSystem: string
   dynamicSystem: string
+  /** 每轮必变（当前时间、按问题挑选的技能等）；不进 instructions，由 engine 注入消息尾部以保住前缀缓存。 */
+  turnSystem: string
 }
 
 const ANTHROPIC_CACHE_CONTROL = { type: 'ephemeral', ttl: '5m' } as const

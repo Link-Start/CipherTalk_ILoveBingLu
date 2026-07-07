@@ -288,11 +288,15 @@ export function buildAgentPromptParts(scope: AgentScope, skills: AgentSkillConte
       options.includeWechatReplyMedia ? STICKER_PROMPT : '',
       options.includeWechatReplyMedia ? WECHAT_REPLY_MEDIA_PROMPT : '',
     ].filter(Boolean).join('\n'),
-    dynamicSystem: [buildCurrentTimePrompt(), buildScopePrompt(scope), buildSkillPrompt(skills)].filter(Boolean).join('\n'),
+    dynamicSystem: buildScopePrompt(scope),
+    // 每轮必变的内容（当前时间精确到秒、按问题挑选的技能）。放进 system 前缀会让
+    // 服务商 prompt cache 每轮全 miss（DeepSeek 带 tools 时前缀中段一变即 0 命中，已实测），
+    // 由 engine 注入到消息尾部而不是 instructions。
+    turnSystem: [buildCurrentTimePrompt(), buildSkillPrompt(skills)].filter(Boolean).join('\n'),
   }
 }
 
 export function buildSystemPrompt(scope: AgentScope, skills: AgentSkillContextItem[] = [], options: AgentPromptOptions = {}): string {
   const parts = buildAgentPromptParts(scope, skills, options)
-  return [parts.cacheableSystem, parts.dynamicSystem].filter(Boolean).join('\n')
+  return [parts.cacheableSystem, parts.dynamicSystem, parts.turnSystem].filter(Boolean).join('\n')
 }

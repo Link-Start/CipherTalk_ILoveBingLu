@@ -40,7 +40,7 @@ export function buildAgentInstructions(
   tools: ReturnType<typeof buildTools>,
   webSearchOn = false,
   imageGenOn = false,
-): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string } {
+): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string; turnMessage: SystemModelMessage | null } {
   const promptParts = buildAgentPromptParts(input.scope, input.skills, {
     includeWechatOutbound: input.outputMode === 'wechat',
     includeWechatReplyMedia: input.allowWechatReplyMedia === true,
@@ -52,20 +52,31 @@ export function buildAgentInstructions(
     webSearchOn ? WEB_SEARCH_PROMPT : '',
     imageGenOn ? IMAGE_GEN_PROMPT : '',
     memoryContext,
-    relevantMemoryContext,
   ].filter(Boolean).join('\n')
+  // 每轮必变的内容（当前时间、按问题挑的技能、本轮相关记忆）放消息尾部：
+  // 前缀（稳定 system + 历史）跨轮字节不变，服务商 prompt cache 才能命中
+  // （DeepSeek 等带 tools 时前缀中段一变即全量 miss，已实测）。
+  // Google 转换器不允许对话中段的 system；Anthropic 靠 breakpoint 缓存、断点后的
+  // 动态 system 不影响命中，且第三方 Claude 代理未必支持 mid-conversation system beta。
+  const turnContext = [promptParts.turnSystem, relevantMemoryContext].filter(Boolean).join('\n')
+  const kind = input.providerConfig.providerKind
+  const tailTurnMessage = kind === 'openai-responses' || kind === 'openai-compatible'
   const instructions: SystemModelMessage[] = [
     { role: 'system', content: promptParts.cacheableSystem },
     ...(dynamicSystem ? [{ role: 'system' as const, content: dynamicSystem }] : []),
+    ...(!tailTurnMessage && turnContext ? [{ role: 'system' as const, content: turnContext }] : []),
   ]
+  const turnMessage: SystemModelMessage | null = tailTurnMessage && turnContext
+    ? { role: 'system', content: turnContext }
+    : null
   const promptCacheKey = buildPromptCacheKey(promptParts, tools)
 
   if (input.providerConfig.providerKind === 'anthropic') {
     const cached = applyAnthropicCacheControl(instructions, tools)
-    return { instructions: cached.messages, tools: cached.tools, promptCacheKey }
+    return { instructions: cached.messages, tools: cached.tools, promptCacheKey, turnMessage }
   }
 
-  return { instructions, tools, promptCacheKey }
+  return { instructions, tools, promptCacheKey, turnMessage }
 }
 
 /** 取最后一条 user 消息的纯文本，供 L1 自动抽取。 */
@@ -352,7 +363,9 @@ export async function runAgent(
     })
 
     const result = await agent.stream({
-      messages: input.messages,
+      // 尾注入本轮上下文（当前时间/技能/相关记忆）：放消息末尾而非 system 前缀，跨轮才有 prompt cache 命中
+      messages: prepared.turnMessage ? [...input.messages, prepared.turnMessage] : input.messages,
+      ...(prepared.turnMessage ? { allowSystemInMessages: true } : {}),
       abortSignal: signal,
       timeout: { totalMs: AGENT_TOTAL_TIMEOUT_MS },
     })
@@ -698,7 +711,13 @@ Deep reply-suggestion mode is connected to the full Agent toolset. You may searc
       }
     },
   })
-  const result = await agent.generate({ messages, abortSignal: signal, timeout: { totalMs: REPLY_SUGGEST_TIMEOUT_MS } })
+  const result = await agent.generate({
+    // 同主循环：本轮上下文尾注入，保住稳定前缀的 prompt cache
+    messages: prepared.turnMessage ? [...messages, prepared.turnMessage] : messages,
+    ...(prepared.turnMessage ? { allowSystemInMessages: true } : {}),
+    abortSignal: signal,
+    timeout: { totalMs: REPLY_SUGGEST_TIMEOUT_MS },
+  })
   return result.text
 }
 
