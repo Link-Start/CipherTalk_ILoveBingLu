@@ -2107,12 +2107,12 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  ipcMain.handle('ai:testConnection', async (_, provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google') => {
+  ipcMain.handle('ai:testConnection', async (_, provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google', model?: string) => {
     try {
       const { aiService } = await import('../../services/ai/aiService')
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       await refreshResolvedProxyUrl() // 测试连接也走代理，保证"测试通过=实际可用"
-      return await aiService.testConnection(provider, apiKey, baseURL, protocol)
+      return await aiService.testConnection(provider, apiKey, baseURL, protocol, model)
     } catch (e) {
       return { success: false, error: String(e) }
     }

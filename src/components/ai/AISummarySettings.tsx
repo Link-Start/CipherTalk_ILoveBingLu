@@ -601,6 +601,10 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
       showMessage('自定义服务需要填写服务地址', false)
       return
     }
+    if (!model.trim()) {
+      showMessage('请先选择或输入要测试的模型', false)
+      return
+    }
 
     setIsTesting(true)
     try {
@@ -608,7 +612,8 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
         provider,
         apiKey,
         baseURL,
-        currentProvider?.protocolOptions?.length ? customProtocol : undefined
+        currentProvider?.protocolOptions?.length ? customProtocol : undefined,
+        model,
       )
       showMessage(result.success ? '连接测试成功' : (result.error || '连接测试失败'), result.success)
       if (result.success) {

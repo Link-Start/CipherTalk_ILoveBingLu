@@ -1587,7 +1587,7 @@ export interface ElectronAPI {
       message?: string
       error?: string
     }>
-    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google') => Promise<{
+    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google', model?: string) => Promise<{
       success: boolean
       error?: string
       needsProxy?: boolean
