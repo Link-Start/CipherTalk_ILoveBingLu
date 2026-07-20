@@ -891,10 +891,6 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
 
         {configMode === 'llm' && (
           <Card>
-            <Card.Header>
-              <Card.Title>ChatGPT 订阅账号</Card.Title>
-              <Card.Description>Codex App Server</Card.Description>
-            </Card.Header>
             <Card.Content>
               <ChatGPTSubscriptionAuth compact onAuthenticationChange={setCodexAuthenticated} />
             </Card.Content>
